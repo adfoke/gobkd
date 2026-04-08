@@ -2,6 +2,7 @@ package config
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"strings"
 )
@@ -17,19 +18,53 @@ type Config struct {
 	LogLevel      string
 }
 
-func Load() Config {
+func Load() (Config, error) {
 	loadDotEnv(".env")
 
-	return Config{
+	cfg := Config{
 		AppEnv:        getenv("APP_ENV", "dev"),
 		HTTPAddr:      getenv("HTTP_ADDR", ":8080"),
 		AppBaseURL:    getenv("APP_BASE_URL", "http://127.0.0.1:8080"),
 		SQLitePath:    getenv("SQLITE_PATH", "./data/app.db"),
-		AuthSecret:    getenv("AUTH_SECRET", "change-me"),
-		AuthLocalUser: getenv("AUTH_LOCAL_USER", "admin"),
-		AuthLocalPass: getenv("AUTH_LOCAL_PASS", "admin"),
+		AuthSecret:    getenv("AUTH_SECRET", ""),
+		AuthLocalUser: getenv("AUTH_LOCAL_USER", ""),
+		AuthLocalPass: getenv("AUTH_LOCAL_PASS", ""),
 		LogLevel:      getenv("LOG_LEVEL", "info"),
 	}
+
+	if err := cfg.Validate(); err != nil {
+		return Config{}, err
+	}
+
+	return cfg, nil
+}
+
+func (c Config) Validate() error {
+	var problems []string
+
+	switch {
+	case strings.TrimSpace(c.AuthSecret) == "":
+		problems = append(problems, "AUTH_SECRET is required")
+	case c.AuthSecret == "change-me":
+		problems = append(problems, "AUTH_SECRET must not use the placeholder value")
+	}
+
+	if strings.TrimSpace(c.AuthLocalUser) == "" {
+		problems = append(problems, "AUTH_LOCAL_USER is required")
+	}
+
+	switch {
+	case strings.TrimSpace(c.AuthLocalPass) == "":
+		problems = append(problems, "AUTH_LOCAL_PASS is required")
+	case c.AuthLocalPass == "admin":
+		problems = append(problems, "AUTH_LOCAL_PASS must not use the placeholder value")
+	}
+
+	if len(problems) > 0 {
+		return fmt.Errorf("invalid auth config: %s", strings.Join(problems, "; "))
+	}
+
+	return nil
 }
 
 func loadDotEnv(path string) {

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"os"
@@ -25,7 +26,10 @@ import (
 )
 
 func Run(ctx context.Context) error {
-	cfg := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
 
 	log, err := logger.New(cfg.LogLevel)
 	if err != nil {
@@ -79,6 +83,7 @@ func buildRouter(db *sql.DB, log *logrus.Logger, authService *authx.Service) *gi
 	gin.SetMode(gin.ReleaseMode)
 
 	router := gin.New()
+	router.HandleMethodNotAllowed = true
 	router.Use(appmw.RequestID())
 	router.Use(appmw.SecurityHeaders())
 	router.Use(appmw.Recovery(log))
@@ -152,8 +157,31 @@ func runMigrations(ctx context.Context, db *sql.DB) error {
 		return err
 	}
 
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS schema_migrations (
+	name TEXT PRIMARY KEY,
+	applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+`); err != nil {
+		return err
+	}
+
 	for _, entry := range entries {
 		if entry.IsDir() {
+			continue
+		}
+
+		applied, err := migrationApplied(ctx, tx, entry.Name())
+		if err != nil {
+			return err
+		}
+		if applied {
 			continue
 		}
 
@@ -162,10 +190,30 @@ func runMigrations(ctx context.Context, db *sql.DB) error {
 			return err
 		}
 
-		if _, err := db.ExecContext(ctx, string(query)); err != nil {
-			return err
+		if _, err := tx.ExecContext(ctx, string(query)); err != nil {
+			return fmt.Errorf("apply migration %s: %w", entry.Name(), err)
+		}
+
+		if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (name) VALUES (?)`, entry.Name()); err != nil {
+			return fmt.Errorf("record migration %s: %w", entry.Name(), err)
 		}
 	}
 
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+func migrationApplied(ctx context.Context, tx *sql.Tx, name string) (bool, error) {
+	var exists int
+	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM schema_migrations WHERE name = ?`, name).Scan(&exists); err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, err
+	}
+
+	return true, nil
 }

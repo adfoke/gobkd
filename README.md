@@ -66,8 +66,8 @@ migrations                   # SQL migration
 当前接法：
 
 - 使用 `local` direct provider
-- 默认账号 `admin`
-- 默认密码 `admin`
+- 本地账号来自 `AUTH_LOCAL_USER`
+- 本地密码来自 `AUTH_LOCAL_PASS`
 - `/auth/*` 交给认证库
 - `/api/v1/*` 先走 `Trace`，再走 `RequireUser`
 
@@ -100,9 +100,9 @@ APP_ENV=dev
 HTTP_ADDR=:8080
 APP_BASE_URL=http://127.0.0.1:8080
 SQLITE_PATH=./data/app.db
-AUTH_SECRET=change-me
-AUTH_LOCAL_USER=admin
-AUTH_LOCAL_PASS=admin
+AUTH_SECRET=
+AUTH_LOCAL_USER=
+AUTH_LOCAL_PASS=
 LOG_LEVEL=info
 ```
 
@@ -183,6 +183,7 @@ type EchoRequest struct {
 
 ```bash
 cp .env.example .env
+# edit .env and fill AUTH_SECRET / AUTH_LOCAL_USER / AUTH_LOCAL_PASS
 go run ./cmd/server
 ```
 
@@ -198,7 +199,7 @@ curl http://127.0.0.1:8080/healthz
 ```bash
 curl -X POST 'http://127.0.0.1:8080/auth/local/login?session=1' \
   -H 'Content-Type: application/json' \
-  -d '{"user":"admin","passwd":"admin"}' \
+  -d '{"user":"<your-user>","passwd":"<your-pass>"}' \
   -c cookies.txt
 ```
 

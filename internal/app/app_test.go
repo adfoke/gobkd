@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -121,6 +122,41 @@ func TestNotFoundResponse(t *testing.T) {
 	assertBodyContains(t, resp.Body, `"error":"not_found"`)
 }
 
+func TestMethodNotAllowedResponse(t *testing.T) {
+	router := newTestRouter(t)
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/api/v1/echo")
+	if err != nil {
+		t.Fatalf("method not allowed request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", resp.StatusCode)
+	}
+
+	assertBodyContains(t, resp.Body, `"error":"method_not_allowed"`)
+}
+
+func TestRunMigrationsOnlyOnce(t *testing.T) {
+	db, err := openDB(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	if err := runMigrations(context.Background(), db); err != nil {
+		t.Fatalf("first migration run failed: %v", err)
+	}
+	if err := runMigrations(context.Background(), db); err != nil {
+		t.Fatalf("second migration run failed: %v", err)
+	}
+
+	assertMigrationCount(t, db, 1)
+}
+
 func newTestRouter(t *testing.T) http.Handler {
 	t.Helper()
 
@@ -209,5 +245,18 @@ func assertBodyContains(t *testing.T, body io.Reader, want string) {
 
 	if !bytes.Contains(data, []byte(want)) {
 		t.Fatalf("expected body to contain %q, got %s", want, string(data))
+	}
+}
+
+func assertMigrationCount(t *testing.T, db *sql.DB, want int) {
+	t.Helper()
+
+	var got int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&got); err != nil {
+		t.Fatalf("count migrations: %v", err)
+	}
+
+	if got != want {
+		t.Fatalf("expected %d migrations, got %d", want, got)
 	}
 }
