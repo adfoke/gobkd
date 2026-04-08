@@ -8,11 +8,15 @@ import (
 )
 
 type UserRepository struct {
-	db *sql.DB
+	db DBTX
 }
 
-func NewUserRepository(db *sql.DB) *UserRepository {
+func NewUserRepository(db DBTX) *UserRepository {
 	return &UserRepository{db: db}
+}
+
+func (r *UserRepository) WithTx(tx *sql.Tx) *UserRepository {
+	return &UserRepository{db: tx}
 }
 
 func (r *UserRepository) UpsertByExternalID(ctx context.Context, user model.User) (model.User, error) {

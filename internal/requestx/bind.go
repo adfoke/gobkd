@@ -2,10 +2,12 @@ package requestx
 
 import (
 	"errors"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 
+	"gobkd/internal/apperr"
 	"gobkd/internal/response"
 )
 
@@ -34,6 +36,12 @@ func BindURI(c *gin.Context, dst interface{}) bool {
 }
 
 func handleBindError(c *gin.Context, err error) {
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
+		response.FromError(c, apperr.RequestTooLarge(maxBytesErr.Limit))
+		return
+	}
+
 	var validationErrs validator.ValidationErrors
 	if errors.As(err, &validationErrs) {
 		details := make([]response.ErrorField, 0, len(validationErrs))
@@ -43,9 +51,9 @@ func handleBindError(c *gin.Context, err error) {
 				Rule:  item.Tag(),
 			})
 		}
-		response.ValidationFailed(c, details)
+		response.FromError(c, apperr.ValidationFailed(details))
 		return
 	}
 
-	response.InvalidRequest(c, err.Error())
+	response.FromError(c, apperr.InvalidRequest(err.Error()))
 }

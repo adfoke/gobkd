@@ -1,11 +1,13 @@
 package response
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
 	"gobkd/internal/appctx"
+	"gobkd/internal/apperr"
 )
 
 type Code string
@@ -18,6 +20,7 @@ const (
 	CodeNotFound         Code = "not_found"
 	CodeMethodNotAllowed Code = "method_not_allowed"
 	CodeConflict         Code = "conflict"
+	CodeRequestTooLarge  Code = "payload_too_large"
 	CodeInternalError    Code = "internal_error"
 	CodeServiceDown      Code = "service_unavailable"
 )
@@ -46,6 +49,26 @@ func Error(c *gin.Context, status int, code Code, message string, details interf
 		RequestID: appctx.GetString(c, appctx.RequestIDKey),
 	}
 	c.AbortWithStatusJSON(status, body)
+}
+
+func FromError(c *gin.Context, err error) {
+	if err == nil {
+		return
+	}
+
+	var appErr *apperr.Error
+	if !errors.As(err, &appErr) {
+		InternalError(c, "internal server error")
+		return
+	}
+
+	Error(
+		c,
+		apperr.Status(appErr),
+		Code(apperr.ErrorCode(appErr)),
+		apperr.Message(appErr),
+		apperr.Details(appErr),
+	)
 }
 
 func InvalidRequest(c *gin.Context, message string) {

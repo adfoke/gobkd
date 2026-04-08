@@ -35,6 +35,7 @@ internal/service             # 业务逻辑
 internal/repository          # sqlite 访问
 internal/middleware          # 请求中间件
 internal/requestx            # 参数绑定和校验
+internal/apperr             # 业务错误和错误码映射
 internal/response            # 统一响应和错误码
 internal/model               # 数据结构
 migrations                   # SQL migration
@@ -56,6 +57,7 @@ migrations                   # SQL migration
 - `SecurityHeaders`
 - `Recovery`
 - `RequestLogger`
+- `RequestBodyLimit`
 - `Auth Trace`
 - `RequireUser`
 
@@ -84,6 +86,12 @@ migrations                   # SQL migration
 1. 打开 sqlite
 2. 执行 `migrations/*.sql`
 3. repository 直接写 SQL
+4. 多步写操作通过事务封装执行
+
+事务入口：
+
+- `repository.Transactor.WithinTransaction`
+- `repository.(*UserRepository).WithTx`
 
 当前表：
 
@@ -104,6 +112,14 @@ AUTH_SECRET=
 AUTH_LOCAL_USER=
 AUTH_LOCAL_PASS=
 LOG_LEVEL=info
+HTTP_READ_TIMEOUT=10s
+HTTP_READ_HEADER_TIMEOUT=5s
+HTTP_WRITE_TIMEOUT=15s
+HTTP_IDLE_TIMEOUT=60s
+HTTP_SHUTDOWN_TIMEOUT=10s
+HTTP_MAX_HEADER_BYTES=1048576
+HTTP_MAX_BODY_BYTES=1048576
+HTTP_TRUSTED_PROXIES=
 ```
 
 ## 统一响应
@@ -135,8 +151,15 @@ LOG_LEVEL=info
 - `not_found`
 - `method_not_allowed`
 - `conflict`
+- `payload_too_large`
 - `internal_error`
 - `service_unavailable`
+
+业务错误建议：
+
+- `service` / `repository` 返回 `internal/apperr`
+- `handler` 统一走 `response.FromError`
+- 不要在每个 handler 里手写状态码分支
 
 ## 参数校验
 

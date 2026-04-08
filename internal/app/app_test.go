@@ -10,7 +10,9 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	authx "gobkd/internal/auth"
 	"gobkd/internal/config"
@@ -104,6 +106,34 @@ func TestValidationResponse(t *testing.T) {
 	assertBodyContains(t, resp.Body, `"error":"validation_failed"`)
 }
 
+func TestPayloadTooLargeResponse(t *testing.T) {
+	router := newTestRouter(t)
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	client := newTestClient(t)
+	login(client, t, server.URL)
+
+	body := `{"message":"` + strings.Repeat("a", 2048) + `"}`
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/echo", bytes.NewReader([]byte(body)))
+	if err != nil {
+		t.Fatalf("create oversized echo request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("oversized echo request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413, got %d", resp.StatusCode)
+	}
+
+	assertBodyContains(t, resp.Body, `"error":"payload_too_large"`)
+}
+
 func TestNotFoundResponse(t *testing.T) {
 	router := newTestRouter(t)
 	server := httptest.NewServer(router)
@@ -161,14 +191,22 @@ func newTestRouter(t *testing.T) http.Handler {
 	t.Helper()
 
 	cfg := config.Config{
-		AppEnv:        "dev",
-		HTTPAddr:      ":0",
-		AppBaseURL:    "http://127.0.0.1:8080",
-		SQLitePath:    filepath.Join(t.TempDir(), "test.db"),
-		AuthSecret:    "test-secret",
-		AuthLocalUser: "admin",
-		AuthLocalPass: "admin",
-		LogLevel:      "error",
+		AppEnv:                "dev",
+		HTTPAddr:              ":0",
+		AppBaseURL:            "http://127.0.0.1:8080",
+		SQLitePath:            filepath.Join(t.TempDir(), "test.db"),
+		AuthSecret:            "test-secret",
+		AuthLocalUser:         "admin",
+		AuthLocalPass:         "admin",
+		LogLevel:              "error",
+		HTTPReadTimeout:       10 * time.Second,
+		HTTPReadHeaderTimeout: 5 * time.Second,
+		HTTPWriteTimeout:      15 * time.Second,
+		HTTPIdleTimeout:       60 * time.Second,
+		HTTPShutdownTimeout:   10 * time.Second,
+		HTTPMaxHeaderBytes:    1 << 20,
+		HTTPMaxBodyBytes:      1024,
+		HTTPTrustedProxies:    []string{},
 	}
 
 	log, err := logger.New(cfg.LogLevel)
@@ -186,7 +224,12 @@ func newTestRouter(t *testing.T) http.Handler {
 		t.Fatalf("run migrations: %v", err)
 	}
 
-	return buildRouter(db, log, authx.New(cfg))
+	router, err := buildRouter(cfg, db, log, authx.New(cfg))
+	if err != nil {
+		t.Fatalf("build router: %v", err)
+	}
+
+	return router
 }
 
 func newTestClient(t *testing.T) *http.Client {

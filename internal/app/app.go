@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/mattn/go-sqlite3"
@@ -47,18 +46,28 @@ func Run(ctx context.Context) error {
 	}
 
 	authService := authx.New(cfg)
-	router := buildRouter(db, log, authService)
+	router, err := buildRouter(cfg, db, log, authService)
+	if err != nil {
+		return err
+	}
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           router,
-		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       cfg.HTTPReadTimeout,
+		ReadHeaderTimeout: cfg.HTTPReadHeaderTimeout,
+		WriteTimeout:      cfg.HTTPWriteTimeout,
+		IdleTimeout:       cfg.HTTPIdleTimeout,
+		MaxHeaderBytes:    cfg.HTTPMaxHeaderBytes,
 	}
 
 	log.WithFields(logrus.Fields{
-		"addr":        cfg.HTTPAddr,
-		"app_env":     cfg.AppEnv,
-		"sqlite_path": cfg.SQLitePath,
+		"addr":          cfg.HTTPAddr,
+		"app_env":       cfg.AppEnv,
+		"sqlite_path":   cfg.SQLitePath,
+		"read_timeout":  cfg.HTTPReadTimeout.String(),
+		"write_timeout": cfg.HTTPWriteTimeout.String(),
+		"idle_timeout":  cfg.HTTPIdleTimeout.String(),
 	}).Info("server starting")
 
 	errCh := make(chan error, 1)
@@ -68,7 +77,7 @@ func Run(ctx context.Context) error {
 
 	select {
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.HTTPShutdownTimeout)
 		defer cancel()
 		return srv.Shutdown(shutdownCtx)
 	case err := <-errCh:
@@ -79,20 +88,25 @@ func Run(ctx context.Context) error {
 	}
 }
 
-func buildRouter(db *sql.DB, log *logrus.Logger, authService *authx.Service) *gin.Engine {
+func buildRouter(cfg config.Config, db *sql.DB, log *logrus.Logger, authService *authx.Service) (*gin.Engine, error) {
 	gin.SetMode(gin.ReleaseMode)
 
 	router := gin.New()
 	router.HandleMethodNotAllowed = true
+	if err := router.SetTrustedProxies(cfg.HTTPTrustedProxies); err != nil {
+		return nil, err
+	}
 	router.Use(appmw.RequestID())
 	router.Use(appmw.SecurityHeaders())
 	router.Use(appmw.Recovery(log))
 	router.Use(appmw.RequestLogger(log))
+	router.Use(appmw.RequestBodyLimit(cfg.HTTPMaxBodyBytes))
 
 	systemHandler := handler.NewSystemHandler(db)
 	demoHandler := handler.NewDemoHandler()
 	userRepo := repository.NewUserRepository(db)
-	userService := service.NewUserService(userRepo)
+	transactor := repository.NewTransactor(db)
+	userService := service.NewUserService(userRepo, transactor)
 	userHandler := handler.NewUserHandler(authService, userService)
 
 	router.GET("/ping", systemHandler.Ping)
@@ -112,7 +126,7 @@ func buildRouter(db *sql.DB, log *logrus.Logger, authService *authx.Service) *gi
 	api.GET("/me", userHandler.Me)
 	api.POST("/echo", demoHandler.Echo)
 
-	return router
+	return router, nil
 }
 
 func wrapHTTPMiddleware(mw func(http.Handler) http.Handler) gin.HandlerFunc {
