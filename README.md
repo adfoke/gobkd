@@ -231,3 +231,68 @@ curl -X POST 'http://127.0.0.1:8080/auth/local/login?session=1' \
 ```bash
 curl http://127.0.0.1:8080/api/v1/me -b cookies.txt
 ```
+
+## Linux build 和部署
+
+前提：
+
+- Linux
+- `go`
+- `gcc` 或 `cc`，这个项目用 `sqlite3`，构建需要 CGO
+- `systemd`
+- `curl`
+
+准备环境：
+
+```bash
+cp .env.example .env
+# edit .env
+```
+
+部署脚本：
+
+```bash
+chmod +x ./scripts/deploy_linux.sh
+./scripts/deploy_linux.sh
+```
+
+默认行为：
+
+- 构建 `./cmd/server`
+- 发布到 `/opt/gobkd/releases/<timestamp>`
+- 持久化 `.env` 到 `/opt/gobkd/shared/.env`
+- 持久化 sqlite 数据到 `/opt/gobkd/shared/data`
+- 切换 `/opt/gobkd/current`
+- 如果系统里已有 `gobkd.service`，自动重启并检查 `http://127.0.0.1:8080/healthz`
+
+可改环境变量：
+
+```bash
+APP_NAME=gobkd
+SERVICE_NAME=gobkd
+INSTALL_ROOT=/opt/gobkd
+HEALTHCHECK_URL=http://127.0.0.1:8080/healthz
+RESTART_SERVICE=auto
+```
+
+`systemd` 可参考：
+
+- `deploy/gobkd.service.example`
+
+卸载脚本：
+
+```bash
+chmod +x ./scripts/uninstall_linux.sh
+CONFIRM_UNINSTALL=YES ./scripts/uninstall_linux.sh
+```
+
+默认会：
+
+- 停掉并禁用 `gobkd.service`
+- 删除 `/opt/gobkd`
+
+如果连 service 文件也要删：
+
+```bash
+REMOVE_SERVICE_FILE=1 CONFIRM_UNINSTALL=YES ./scripts/uninstall_linux.sh
+```
